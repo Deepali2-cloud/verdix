@@ -1,0 +1,29 @@
+{
+  "name": "verdix",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VERDIX — Privacy-Preserving Data Evaluation Infrastructure",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:web": "npm run dev --workspace=@verdix/web",
+    "dev:api": "npm run dev --workspace=@verdix/api",
+    "health": "node scripts/health-check.mjs",
+    "agent:check": "python agent/verdix_agent/cli.py --health-check",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "keywords": [
+    "privacy-preserving",
+    "data-evaluation",
+    "confidential-computing",
+    "verdix"
+  ],
+  "author": "VERDIX Core Team",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}
