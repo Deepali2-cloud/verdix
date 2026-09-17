@@ -918,10 +918,57 @@ app.get("/api/v1/privacy/policies", requireAuth, async (req: Request, res: Respo
 });
 
 // ==============================================================================
+// AGENT AUTHENTICATION
+// ==============================================================================
+
+function requireAgentToken(req: Request, res: Response, next: () => void): void {
+  const configuredToken = process.env.VERDIX_AGENT_TOKEN;
+
+  // Fail closed in production if the Agent secret has not been configured.
+  if (!configuredToken && process.env.NODE_ENV !== "test") {
+    logger.error("VERDIX_AGENT_TOKEN is not configured; rejecting Agent request.");
+    res.status(503).json({
+      error: "Agent authentication is not configured",
+      code: "AGENT_AUTH_NOT_CONFIGURED",
+    });
+    return;
+  }
+
+  // Keep automated tests independent from production secrets.
+  if (process.env.NODE_ENV === "test") {
+    next();
+    return;
+  }
+
+  const authorization = req.headers.authorization;
+
+  if (!authorization || !authorization.startsWith("Bearer ")) {
+    res.status(401).json({
+      error: "Agent authentication required",
+      code: "AGENT_AUTH_REQUIRED",
+    });
+    return;
+  }
+
+  const suppliedToken = authorization.slice("Bearer ".length).trim();
+
+  if (!suppliedToken || suppliedToken !== configuredToken) {
+    logger.warn("Rejected Agent request with invalid authentication token.");
+    res.status(401).json({
+      error: "Invalid Agent authentication token",
+      code: "AGENT_AUTH_INVALID",
+    });
+    return;
+  }
+
+  next();
+}
+
+// ==============================================================================
 // 5. AGENT HEARTBEAT & INGESTION (Existing Endpoints)
 // ==============================================================================
 
-app.post("/api/v1/agent/heartbeat", (req: Request, res: Response) => {
+app.post("/api/v1/agent/heartbeat", requireAgentToken, (req: Request, res: Response) => {
   const heartbeat = req.body as AgentHeartbeat;
 
   if (!heartbeat?.agentId) {
@@ -943,7 +990,7 @@ app.post("/api/v1/agent/heartbeat", (req: Request, res: Response) => {
   });
 });
 
-app.post("/api/v1/evaluations/results", (req: Request, res: Response) => {
+app.post("/api/v1/evaluations/results", requireAgentToken, (req: Request, res: Response) => {
   try {
     const validatedResult = validateAggregateResult(req.body);
     receivedResults.set(validatedResult.jobId, validatedResult);
@@ -1104,7 +1151,7 @@ async function handleEvaluationResultSubmission(id: string, payload: any) {
  * POST /api/v1/evaluations/:id/run
  * Transitions evaluation to RUNNING and dispatches local Agent evaluation instruction.
  */
-app.post("/api/v1/evaluations/:id/run", async (req: Request, res: Response) => {
+app.post("/api/v1/evaluations/:id/results", requireAgentToken, async (req: Request, res: Response) => {
   const { id } = req.params;
 
   let evaluation: any = null;
