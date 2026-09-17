@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "dev": "concurrently -k -n \"api,web\" -c \"blue.bold,green.bold\" \"npm run dev:api\" \"npm run dev:web\"",
     "dev:web": "npm run dev --workspace=@verdix/web",
     "dev:api": "npm run dev --workspace=@verdix/api",
     "health": "node scripts/health-check.mjs",
@@ -24,6 +25,7 @@
   "author": "VERDIX Core Team",
   "license": "Apache-2.0",
   "devDependencies": {
+    "concurrently": "^10.0.5",
     "typescript": "^5.4.5"
   }
 }

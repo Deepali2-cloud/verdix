@@ -1,5 +1,5 @@
 import React from "react";
-import { ShieldCheck, CheckCircle2, XCircle, ShieldAlert } from "lucide-react";
+import { ShieldCheck, CheckCircle2, XCircle, ShieldAlert, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface StatusBadgeProps {
@@ -10,6 +10,34 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ status, className, showIcon = true }: StatusBadgeProps) {
   const normalized = status.toLowerCase();
+
+  if (normalized === "pending") {
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/80",
+          className
+        )}
+      >
+        {showIcon && <Clock className="w-3 h-3 text-amber-600" />}
+        <span>{status}</span>
+      </span>
+    );
+  }
+
+  if (normalized === "ready") {
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-200/80",
+          className
+        )}
+      >
+        {showIcon && <CheckCircle2 className="w-3 h-3 text-teal-600" />}
+        <span>{status}</span>
+      </span>
+    );
+  }
 
   if (normalized === "completed" || normalized === "success" || normalized === "verified") {
     return (

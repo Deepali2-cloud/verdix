@@ -1,0 +1,175 @@
+// ==============================================================================
+// VERDIX — Prisma ORM Schema
+// Architectural Invariant: RAW DATASETS MUST NEVER BE STORED IN THE CLOUD DATABASE.
+// This schema strictly models datasets by metadata and aggregate evaluation results.
+// ==============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  ANALYST
+  VIEWER
+}
+
+enum DatasetStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+enum EvaluationStatus {
+  PENDING
+  READY
+  RUNNING
+  COMPLETED
+  FAILED
+  CREATED
+  QUEUED
+}
+
+enum EvaluationType {
+  DATA_QUALITY
+  ANOMALY
+  BIAS
+  FULL
+}
+
+enum PrivacyStatus {
+  ENFORCED
+  BLOCKED
+  REVIEW_REQUIRED
+}
+
+enum ActorType {
+  USER
+  AGENT
+  SYSTEM
+}
+
+model Organization {
+  id              String          @id @default(uuid())
+  name            String
+  slug            String          @unique
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  users           User[]
+  datasets        Dataset[]
+  evaluations     Evaluation[]
+  auditLogs       AuditLog[]
+  privacyPolicies PrivacyPolicy[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  email          String       @unique
+  passwordHash   String
+  role           UserRole     @default(ANALYST)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@map("users")
+}
+
+model Dataset {
+  id             String        @id @default(uuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  sourceType     String
+  status         DatasetStatus @default(CONNECTED)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  evaluations    Evaluation[]
+
+  @@map("datasets")
+}
+
+model Evaluation {
+  id             String           @id @default(uuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  datasetId      String
+  dataset        Dataset          @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  status         EvaluationStatus @default(PENDING)
+  evaluationType EvaluationType   @default(FULL)
+  checks         Json?
+  createdBy      String?
+  createdAt      DateTime         @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
+  updatedAt      DateTime         @updatedAt
+
+  results        EvaluationResult[]
+  auditLogs      AuditLog[]
+
+  @@map("evaluations")
+}
+
+model EvaluationResult {
+  id                    String        @id @default(uuid())
+  evaluationId          String
+  evaluation            Evaluation    @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  completenessScore     Float
+  consistencyScore      Float
+  duplicateRate         Float
+  anomalyCount          Int
+  invalidValueCount     Int
+  missingValueRate      Float
+  biasIndicator         Float
+  privacyStatus         PrivacyStatus @default(ENFORCED)
+  rawRecordsTransferred Int           @default(0) // Architectural Rule: Must be 0
+  processingTimeMs      Int
+  createdAt             DateTime      @default(now())
+
+  @@map("evaluation_results")
+}
+
+model AuditLog {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  evaluationId   String?
+  evaluation     Evaluation?  @relation(fields: [evaluationId], references: [id], onDelete: SetNull)
+  action         String
+  actorType      ActorType    @default(SYSTEM)
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  @@map("audit_logs")
+}
+
+model PrivacyPolicy {
+  id                     String       @id @default(uuid())
+  organizationId         String
+  organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name                   String
+  allowAggregates        Boolean      @default(true)
+  allowQualityScores     Boolean      @default(true)
+  allowMissingRates      Boolean      @default(true)
+  allowAnomalyCounts     Boolean      @default(true)
+  allowBiasIndicators    Boolean      @default(true)
+  allowIndividualRecords Boolean      @default(false) // Strictly false
+  allowRawDataset        Boolean      @default(false) // Strictly false
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  @@map("privacy_policies")
+}

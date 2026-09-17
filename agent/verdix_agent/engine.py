@@ -106,3 +106,83 @@ class EvaluationEngine:
         PrivacyGuardrail.validate_aggregate_output(result)
 
         return result
+
+    def evaluate_completeness(
+        self,
+        target: Any,
+        thresholds: Optional[Any] = None,
+    ) -> Any:
+        """
+        Evaluate dataset completeness via the local CompletenessEngine.
+        Takes either a CSV path string or an existing LocalProfile.
+        Returns (CompletenessLocalResult, CompletenessExportResult).
+        """
+        from verdix_agent.completeness.engine import CompletenessEngine
+        engine = CompletenessEngine(thresholds=thresholds)
+        return engine.evaluate(target)
+
+    def evaluate_validity(
+        self,
+        csv_path: str,
+        profile: Optional[Any] = None,
+        thresholds: Optional[Any] = None,
+        rules: Optional[Any] = None,
+    ) -> Any:
+        """
+        Evaluate dataset validity via the local ValidityEngine.
+        Returns (ValidityLocalResult, ValidityExportResult).
+        """
+        from verdix_agent.validity.engine import ValidityEngine
+        engine = ValidityEngine(thresholds=thresholds, rules=rules)
+        return engine.evaluate(csv_path=csv_path, profile=profile)
+
+    def evaluate_duplicates(
+        self,
+        target: Any,
+        thresholds: Optional[Any] = None,
+    ) -> Any:
+        """
+        Evaluate dataset duplicates via the local DuplicateEngine.
+        Takes either a CSV path string or an existing LocalProfile.
+        Returns (DuplicateLocalResult, DuplicateExportResult).
+        """
+        from verdix_agent.duplicates.engine import DuplicateEngine
+        engine = DuplicateEngine(thresholds=thresholds)
+        return engine.evaluate(target)
+
+    def evaluate_consistency(
+        self,
+        csv_path: str,
+        profile: Optional[Any] = None,
+        thresholds: Optional[Any] = None,
+        rules: Optional[Any] = None,
+    ) -> Any:
+        """
+        Evaluate dataset consistency via the local ConsistencyEngine.
+        Returns (ConsistencyLocalResult, ConsistencyExportResult).
+        """
+        from verdix_agent.consistency.engine import ConsistencyEngine
+        engine = ConsistencyEngine(thresholds=thresholds, rules=rules)
+        return engine.evaluate(csv_path=csv_path, profile=profile)
+
+    def generate_ai_report(
+        self,
+        evaluation_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Generate an AI-assisted interpretation of deterministic
+        VERDIX evaluation results.
+
+        IMPORTANT:
+        Only sanitized evaluation evidence is sent to the local
+        Ollama/Qwen3 model. Raw dataset records are never sent.
+        """
+
+        from verdix_agent.llm.ollama_client import OllamaClient
+
+        # Enforce privacy before allowing the LLM to see anything.
+        PrivacyGuardrail.validate_aggregate_output(evaluation_result)
+
+        client = OllamaClient()
+
+        return client.explain_evaluation(evaluation_result)

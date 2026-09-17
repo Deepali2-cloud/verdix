@@ -26,6 +26,24 @@ export type EvaluationMetricType =
   | "confusion_matrix"
   | "fairness_disparity";
 
+export type EvaluationCheckType =
+  | "completeness"
+  | "validity"
+  | "duplicates"
+  | "consistency"
+  | "outliers"
+  | "anomalies"
+  | "bias_fairness";
+
+export type EvaluationStatusType =
+  | "PENDING"
+  | "READY"
+  | "RUNNING"
+  | "COMPLETED"
+  | "FAILED"
+  | "CREATED"
+  | "QUEUED";
+
 export interface PrivacyPolicySpec {
   minGroupSize: number; // Minimum bucket size to prevent k-anonymity violation
   differentialPrivacyEpsilon?: number;

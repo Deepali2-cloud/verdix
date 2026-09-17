@@ -7,10 +7,18 @@ _agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _agent_dir not in sys.path:
     sys.path.insert(0, _agent_dir)
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 from verdix_agent.config import AgentConfig
 from verdix_agent.engine import EvaluationEngine, HAS_PANDAS
 from verdix_agent.policy import PrivacyGuardrail, PrivacyPolicyViolation
 from verdix_agent.client import CloudClient
+from verdix_agent.profiler.csv_profiler import CsvProfiler
 
 def check_health(config: AgentConfig) -> int:
     print("=" * 60)
@@ -86,6 +94,155 @@ def run_test_eval(config: AgentConfig) -> int:
     print(json.dumps(aggregates, indent=2))
     return 0
 
+def run_profile(csv_path: str) -> int:
+    try:
+        profiler = CsvProfiler(csv_path)
+        _, exportable = profiler.profile()
+    except FileNotFoundError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except ValueError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except Exception as err:
+        print(f"Error profiling dataset: {err}", file=sys.stderr)
+        return 1
+
+    print("VERDIX LOCAL DATA PROFILE")
+    try:
+        print("─────────────────────────")
+    except UnicodeEncodeError:
+        print("-------------------------")
+    print(f"Rows:              {exportable.row_count}")
+    print(f"Columns:           {exportable.column_count}")
+    print(f"Missing rate:      {exportable.missing_rate:.2f}%")
+    print(f"Duplicate rate:    {exportable.duplicate_rate:.2f}%")
+    print(f"Completeness:      {exportable.completeness_score:.2f}%")
+    print(f"Raw records sent:  {exportable.raw_records_transferred}")
+    print()
+    print("Column types:")
+    print(f"  Numeric: {exportable.numeric_column_count}")
+    print(f"  Categorical: {exportable.categorical_column_count}")
+    print(f"  Boolean: {exportable.boolean_column_count}")
+    return 0
+
+def run_completeness(csv_path: str) -> int:
+    try:
+        from verdix_agent.completeness.engine import CompletenessEngine
+        engine = CompletenessEngine()
+        local_res, export_res = engine.evaluate(csv_path)
+    except FileNotFoundError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except ValueError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except Exception as err:
+        print(f"Error evaluating completeness: {err}", file=sys.stderr)
+        return 1
+
+    print("VERDIX COMPLETENESS EVALUATION")
+    try:
+        print("──────────────────────────────")
+    except UnicodeEncodeError:
+        print("------------------------------")
+    print(f"Rows:                  {local_res.row_count}")
+    print(f"Total cells:           {export_res.total_cells}")
+    print(f"Missing cells:         {export_res.missing_cells}")
+    print(f"Missing rate:          {export_res.missing_rate:.2f}%")
+    print(f"Completeness score:    {export_res.completeness_score:.2f}%")
+    print(f"Status:                {export_res.status}")
+    print(f"Raw records sent:      {export_res.raw_records_transferred}")
+    return 0
+
+def run_validity(csv_path: str) -> int:
+    try:
+        from verdix_agent.validity.engine import ValidityEngine
+        engine = ValidityEngine()
+        local_res, export_res = engine.evaluate(csv_path)
+    except FileNotFoundError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except ValueError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except Exception as err:
+        print(f"Error evaluating validity: {err}", file=sys.stderr)
+        return 1
+
+    print("VERDIX VALIDITY EVALUATION")
+    try:
+        print("──────────────────────────")
+    except UnicodeEncodeError:
+        print("--------------------------")
+    print(f"Rows:                  {local_res.row_count}")
+    print(f"Values checked:        {export_res.total_values_checked}")
+    print(f"Invalid values:        {export_res.invalid_value_count}")
+    print(f"Invalid rate:          {export_res.invalid_rate:.2f}%")
+    print(f"Validity score:        {export_res.validity_score:.2f}%")
+    print(f"Status:                {export_res.status}")
+    print(f"Raw records sent:      {export_res.raw_records_transferred}")
+    return 0
+
+def run_duplicates(csv_path: str) -> int:
+    try:
+        from verdix_agent.duplicates.engine import DuplicateEngine
+        engine = DuplicateEngine()
+        local_res, export_res = engine.evaluate(csv_path)
+    except FileNotFoundError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except ValueError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except Exception as err:
+        print(f"Error evaluating duplicates: {err}", file=sys.stderr)
+        return 1
+
+    print("VERDIX DUPLICATE EVALUATION")
+    try:
+        print("───────────────────────────")
+    except UnicodeEncodeError:
+        print("---------------------------")
+    print(f"Rows:                  {local_res.row_count}")
+    print(f"Unique rows:           {export_res.unique_row_count}")
+    print(f"Duplicate rows:        {export_res.duplicate_row_count}")
+    print(f"Duplicate rate:        {export_res.duplicate_rate:.2f}%")
+    print(f"Duplicate groups:      {export_res.duplicate_group_count}")
+    print(f"Status:                {export_res.status}")
+    print(f"Raw records sent:      {export_res.raw_records_transferred}")
+    return 0
+
+def run_consistency(csv_path: str) -> int:
+    try:
+        from verdix_agent.consistency.engine import ConsistencyEngine
+        engine = ConsistencyEngine()
+        local_res, export_res = engine.evaluate(csv_path)
+    except FileNotFoundError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except ValueError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except Exception as err:
+        print(f"Error evaluating consistency: {err}", file=sys.stderr)
+        return 1
+
+    print("VERDIX CONSISTENCY EVALUATION")
+    try:
+        print("─────────────────────────────")
+    except UnicodeEncodeError:
+        print("-----------------------------")
+    print(f"Rows:                  {local_res.row_count}")
+    print(f"Values checked:        {export_res.values_checked}")
+    print(f"Inconsistent values:   {export_res.inconsistent_count}")
+    print(f"Inconsistency rate:    {export_res.inconsistency_rate:.2f}%")
+    print(f"Consistency score:     {export_res.consistency_score:.2f}%")
+    print(f"Affected rules:        {export_res.affected_rule_count}")
+    print(f"Status:                {export_res.status}")
+    print(f"Raw records sent:      {export_res.raw_records_transferred}")
+    return 0
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="VERDIX Agent — Local Privacy-Preserving Evaluation Enclave"
@@ -106,10 +263,44 @@ def main() -> int:
         version="Verdix Agent 0.1.0",
     )
 
+    subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
+    profile_parser = subparsers.add_parser("profile", help="Profile a local CSV file")
+    profile_parser.add_argument("csv_path", help="Path to local CSV dataset file")
+
+    completeness_parser = subparsers.add_parser(
+        "completeness", help="Evaluate completeness of a local CSV file"
+    )
+    completeness_parser.add_argument("csv_path", help="Path to local CSV dataset file")
+
+    validity_parser = subparsers.add_parser(
+        "validity", help="Evaluate validity of a local CSV file"
+    )
+    validity_parser.add_argument("csv_path", help="Path to local CSV dataset file")
+
+    duplicates_parser = subparsers.add_parser(
+        "duplicates", help="Evaluate duplicate rows in a local CSV file"
+    )
+    duplicates_parser.add_argument("csv_path", help="Path to local CSV dataset file")
+
+    consistency_parser = subparsers.add_parser(
+        "consistency", help="Evaluate logical consistency in a local CSV file"
+    )
+    consistency_parser.add_argument("csv_path", help="Path to local CSV dataset file")
+
     args = parser.parse_args()
     config = AgentConfig.from_env()
 
-    if args.health_check:
+    if args.command == "profile":
+        return run_profile(args.csv_path)
+    elif args.command == "completeness":
+        return run_completeness(args.csv_path)
+    elif args.command == "validity":
+        return run_validity(args.csv_path)
+    elif args.command == "duplicates":
+        return run_duplicates(args.csv_path)
+    elif args.command == "consistency":
+        return run_consistency(args.csv_path)
+    elif args.health_check:
         return check_health(config)
     elif args.test_eval:
         return run_test_eval(config)

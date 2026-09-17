@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { LineChart, Calendar, ChevronDown } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { useRouter } from "next/navigation";
 
 interface AppShellProps {
   title: string;
@@ -19,6 +21,25 @@ export function AppShell({
   showSubheaderControls = true,
 }: AppShellProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { isAuthenticated, isLoading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      router.push("/login");
+    }
+  }, [isAuthenticated, isLoading, router]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#F5F7FB] flex items-center justify-center text-xs font-mono text-slate-500">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse" />
+          <span>Verifying enclave credentials...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F5F7FB] text-[#0F172A] flex antialiased">

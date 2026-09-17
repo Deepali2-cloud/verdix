@@ -1,13 +1,25 @@
 "use client";
 
 import React from "react";
-import { Search, Bell, ShieldCheck, Menu } from "lucide-react";
+import { Search, Bell, ShieldCheck, Menu, LogOut } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 
 interface TopBarProps {
   onToggleMobileMenu: () => void;
 }
 
 export function TopBar({ onToggleMobileMenu }: TopBarProps) {
+  const { currentUser, logout } = useAuth();
+
+  const userName = currentUser?.name || "Enclave Admin";
+  const userRole = currentUser?.role ? `${currentUser.role} Role` : "SecOps Team";
+  const initials = userName
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .substring(0, 2)
+    .toUpperCase() || "EA";
+
   return (
     <header className="h-16 border-b border-[#E2E8F0] bg-white sticky top-0 z-30 px-6 sm:px-8 flex items-center justify-between shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
       {/* Left: Hamburger (mobile) + Search Bar */}
@@ -35,7 +47,7 @@ export function TopBar({ onToggleMobileMenu }: TopBarProps) {
         </div>
       </div>
 
-      {/* Right: Zero Raw-Data Guarantee, Notifications, Profile */}
+      {/* Right: Zero Raw-Data Guarantee, Notifications, Profile & Logout */}
       <div className="flex items-center gap-4">
         {/* Zero Raw-Data Guarantee Pill */}
         <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 font-medium shadow-sm">
@@ -56,12 +68,23 @@ export function TopBar({ onToggleMobileMenu }: TopBarProps) {
         {/* User Profile Area */}
         <div className="flex items-center gap-3 pl-3 border-l border-[#E2E8F0]">
           <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold text-xs shadow-sm">
-            EA
+            {initials}
           </div>
           <div className="hidden lg:block text-left text-xs leading-tight">
-            <div className="font-semibold text-slate-900">Enclave Admin</div>
-            <div className="text-[11px] text-slate-500">SecOps Team</div>
+            <div className="font-semibold text-slate-900">{userName}</div>
+            <div className="text-[11px] text-slate-500">{userRole}</div>
           </div>
+
+          {/* Logout button */}
+          <button
+            type="button"
+            onClick={() => logout()}
+            title="Sign out of enclave"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors ml-1"
+            aria-label="Log out"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </header>
