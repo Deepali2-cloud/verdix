@@ -6,7 +6,7 @@ Only sends agent heartbeats and verified aggregate results.
 import json
 import urllib.request
 import urllib.error
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from verdix_agent.config import AgentConfig
 from verdix_agent.policy import PrivacyGuardrail
 
@@ -48,9 +48,10 @@ class CloudClient:
             url,
             data=body,
             headers={
-                "Content-Type": "application/json",
-                "x-verdix-agent-id": self.config.agent_id,
-            },
+    "Content-Type": "application/json",
+    "x-verdix-agent-id": self.config.agent_id,
+    "Authorization": f"Bearer {self.config.agent_token}",
+},
             method="POST",
         )
         try:
