@@ -1,0 +1,1 @@
+ALTER TYPE "EvaluationStatus" ADD VALUE IF NOT EXISTS 'READY';
