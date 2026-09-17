@@ -1,6 +1,7 @@
 import sys
 import os
 import argparse
+import json
 
 # Ensure agent directory is on sys.path for direct script execution
 _agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -40,6 +41,7 @@ def check_health(config: AgentConfig) -> int:
         "agentId": config.agent_id,
         "datasetAlias": "test_dataset",
         "rawDataIncluded": False,
+        "raw_records_transferred": 0,
         "summaryMetrics": [
             {"metric": "count", "value": 100, "sampleSize": 100}
         ],
@@ -90,7 +92,6 @@ def run_test_eval(config: AgentConfig) -> int:
     )
     print("Evaluation completed successfully.")
     print("Generated Payload (Note: Zero raw data included):")
-    import json
     print(json.dumps(aggregates, indent=2))
     return 0
 
@@ -243,6 +244,118 @@ def run_consistency(csv_path: str) -> int:
     print(f"Raw records sent:      {export_res.raw_records_transferred}")
     return 0
 
+def run_outliers(csv_path: str) -> int:
+    try:
+        from verdix_agent.outliers.engine import OutlierEngine
+        engine = OutlierEngine()
+        local_res, export_res = engine.evaluate(csv_path)
+    except Exception as err:
+        print(f"Error evaluating outliers: {err}", file=sys.stderr)
+        return 1
+
+    print("VERDIX OUTLIER EVALUATION")
+    try:
+        print("─────────────────────────")
+    except UnicodeEncodeError:
+        print("-------------------------")
+    print(f"Rows:                  {local_res.row_count}")
+    print(f"Outlier count:         {export_res.outlier_count}")
+    print(f"Outlier rate:          {export_res.outlier_rate:.2f}%")
+    print(f"Affected columns:      {export_res.affected_column_count}")
+    print(f"Status:                {export_res.status}")
+    print(f"Raw records sent:      {export_res.raw_records_transferred}")
+    return 0
+
+def run_anomalies(csv_path: str) -> int:
+    try:
+        from verdix_agent.anomalies.engine import AnomalyEngine
+        engine = AnomalyEngine()
+        local_res, export_res = engine.evaluate(csv_path)
+    except Exception as err:
+        print(f"Error evaluating anomalies: {err}", file=sys.stderr)
+        return 1
+
+    print("VERDIX ANOMALY EVALUATION")
+    try:
+        print("─────────────────────────")
+    except UnicodeEncodeError:
+        print("-------------------------")
+    print(f"Rows:                  {local_res.row_count}")
+    print(f"Anomaly count:         {export_res.anomaly_count}")
+    print(f"Anomaly rate:          {export_res.anomaly_rate:.2f}%")
+    print(f"Status:                {export_res.status}")
+    print(f"Raw records sent:      {export_res.raw_records_transferred}")
+    return 0
+
+def run_bias(csv_path: str) -> int:
+    try:
+        from verdix_agent.bias.engine import BiasEngine
+        engine = BiasEngine()
+        local_res, export_res = engine.evaluate(csv_path)
+    except Exception as err:
+        print(f"Error evaluating bias: {err}", file=sys.stderr)
+        return 1
+
+    print("VERDIX BIAS & FAIRNESS EVALUATION")
+    try:
+        print("─────────────────────────────────")
+    except UnicodeEncodeError:
+        print("---------------------------------")
+    print(f"Rows:                  {local_res.row_count}")
+    print(f"Groups evaluated:      {export_res.groups_evaluated}")
+    print(f"Max disparity:         {export_res.max_disparity:.4f}")
+    print(f"Fairness score:        {export_res.fairness_score:.2f}%")
+    print(f"Status:                {export_res.status}")
+    print(f"Raw records sent:      {export_res.raw_records_transferred}")
+    return 0
+
+def run_evaluate(csv_path: str, json_output: bool = False) -> int:
+    try:
+        engine = EvaluationEngine()
+        result = engine.run_full_evaluation(csv_path)
+    except FileNotFoundError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except Exception as err:
+        print(f"Error during evaluation: {err}", file=sys.stderr)
+        return 1
+
+    if json_output:
+        print(json.dumps(result, indent=2))
+        return 0
+
+    print("=" * 60)
+    print("VERDIX FULL PRIVACY-PRESERVING DATA EVALUATION")
+    print("=" * 60)
+    print(f"Dataset Alias:             {result['datasetAlias']}")
+    print(f"Evaluation ID:             {result['evaluationId']}")
+    print(f"Rows Evaluated:            {result['row_count']}")
+    print(f"Execution Time:            {result['executionTimeMs']} ms")
+    print("-" * 60)
+    print("OVERALL HEALTH & PRIVACY STATUS:")
+    print(f"  healthScore:             {result['healthScore']}%")
+    print(f"  privacy_status:          {result['privacy_status']}")
+    print(f"  raw_records_transferred: {result['raw_records_transferred']}")
+    print("-" * 60)
+    print("DETAILED ENGINE METRICS:")
+    print(f"  Completeness Score:      {result['completeness']['completeness_score']:.2f}% ({result['completeness']['status']})")
+    print(f"  Validity Score:          {result['validity']['validity_score']:.2f}% ({result['validity']['status']})")
+    print(f"  Duplicate Rate:          {result['duplicates']['duplicate_rate']:.2f}% ({result['duplicates']['status']})")
+    print(f"  Consistency Score:       {result['consistency']['consistency_score']:.2f}% ({result['consistency']['status']})")
+    print(f"  Outlier Rate:            {result['outliers']['outlier_rate']:.2f}% ({result['outliers']['status']})")
+    print(f"  Anomaly Rate:            {result['anomalies']['anomaly_rate']:.2f}% ({result['anomalies']['status']})")
+    print(f"  Fairness Score:          {result['bias_fairness']['fairness_score']:.2f}% ({result['bias_fairness']['status']})")
+    print("=" * 60)
+    print("Summary JSON Result:")
+    print(json.dumps({
+        "healthScore": result["healthScore"],
+        "raw_records_transferred": result["raw_records_transferred"],
+        "privacy_status": result["privacy_status"],
+        "rawDataIncluded": result["rawDataIncluded"],
+        "summaryMetrics": result["summaryMetrics"],
+    }, indent=2))
+    return 0
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="VERDIX Agent — Local Privacy-Preserving Evaluation Enclave"
@@ -264,6 +377,7 @@ def main() -> int:
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
+
     profile_parser = subparsers.add_parser("profile", help="Profile a local CSV file")
     profile_parser.add_argument("csv_path", help="Path to local CSV dataset file")
 
@@ -287,6 +401,29 @@ def main() -> int:
     )
     consistency_parser.add_argument("csv_path", help="Path to local CSV dataset file")
 
+    outliers_parser = subparsers.add_parser(
+        "outliers", help="Evaluate outliers in a local CSV file"
+    )
+    outliers_parser.add_argument("csv_path", help="Path to local CSV dataset file")
+
+    anomalies_parser = subparsers.add_parser(
+        "anomalies", help="Evaluate anomalies in a local CSV file"
+    )
+    anomalies_parser.add_argument("csv_path", help="Path to local CSV dataset file")
+
+    bias_parser = subparsers.add_parser(
+        "bias", help="Evaluate demographic disparity and bias in a local CSV file"
+    )
+    bias_parser.add_argument("csv_path", help="Path to local CSV dataset file")
+
+    evaluate_parser = subparsers.add_parser(
+        "evaluate", help="Execute full privacy-preserving evaluation on a local CSV file"
+    )
+    evaluate_parser.add_argument("csv_path", help="Path to local CSV dataset file")
+    evaluate_parser.add_argument(
+        "--json", action="store_true", help="Output only raw JSON results"
+    )
+
     args = parser.parse_args()
     config = AgentConfig.from_env()
 
@@ -300,6 +437,14 @@ def main() -> int:
         return run_duplicates(args.csv_path)
     elif args.command == "consistency":
         return run_consistency(args.csv_path)
+    elif args.command == "outliers":
+        return run_outliers(args.csv_path)
+    elif args.command == "anomalies":
+        return run_anomalies(args.csv_path)
+    elif args.command == "bias":
+        return run_bias(args.csv_path)
+    elif args.command == "evaluate":
+        return run_evaluate(args.csv_path, getattr(args, "json", False))
     elif args.health_check:
         return check_health(config)
     elif args.test_eval:

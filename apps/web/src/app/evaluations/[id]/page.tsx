@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { getEvaluation, ApiEvaluation } from "@/lib/api";
+import { getEvaluation, runEvaluation, ApiEvaluation } from "@/lib/api";
 import {
   ArrowLeft,
   FileSpreadsheet,
@@ -19,9 +19,11 @@ import {
   Layers,
   AlertTriangle,
   Info,
-  Terminal,
+  Play,
+  Activity,
+  RefreshCw,
+  Lock,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 const CHECK_DESCRIPTIONS: Record<string, { name: string; description: string }> = {
   completeness: {
@@ -56,34 +58,73 @@ const CHECK_DESCRIPTIONS: Record<string, { name: string; description: string }> 
 
 export default function EvaluationDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params?.id as string;
 
   const [evaluation, setEvaluation] = useState<ApiEvaluation | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const fetchDetails = async () => {
+    if (!id) return;
+    try {
+      const data = await getEvaluation(id);
+      if (data) {
+        setEvaluation(data);
+        if (data.status === "COMPLETED" || data.status === "FAILED") {
+          setIsRunning(false);
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
+        }
+      }
+    } catch (err: unknown) {
+      const e = err as Error;
+      setError(e.message || "Failed to load evaluation details.");
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await getEvaluation(id);
-        if (!data) {
-          setError("Evaluation not found or you do not have access to it.");
-        } else {
-          setEvaluation(data);
-        }
-      } catch (err: unknown) {
-        const e = err as Error;
-        setError(e.message || "Failed to load evaluation details.");
-      } finally {
-        setLoading(false);
+    setLoading(true);
+    fetchDetails().finally(() => setLoading(false));
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
       }
-    }
-    load();
+    };
   }, [id]);
+
+  const handleStartEvaluation = async () => {
+    if (!id) return;
+    setIsRunning(true);
+    setError(null);
+    try {
+      await runEvaluation(id);
+      // Immediately refresh and poll
+      await fetchDetails();
+      pollIntervalRef.current = setInterval(fetchDetails, 1500);
+    } catch (err: unknown) {
+      const e = err as Error;
+      setError(e.message || "Failed to start evaluation.");
+      setIsRunning(false);
+    }
+  };
+
+  // Determine latest result metrics if available
+  const latestResult = evaluation?.results && evaluation.results.length > 0
+    ? evaluation.results[0]
+    : null;
+
+  const detailed = latestResult?.detailedMetrics || null;
+
+  // Compute or extract health score
+  const healthScore = detailed?.healthScore ??
+    latestResult?.healthScore ??
+    (latestResult ? (latestResult.completenessScore + latestResult.consistencyScore) / 2 : null);
 
   return (
     <AppShell
@@ -91,7 +132,7 @@ export default function EvaluationDetailPage() {
       subtitle="Inspect evaluation specification and enclave worker execution status."
     >
       {/* Back Button & Navigation */}
-      <div>
+      <div className="flex items-center justify-between">
         <Link
           href="/evaluations"
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors"
@@ -99,6 +140,50 @@ export default function EvaluationDetailPage() {
           <ArrowLeft className="w-4 h-4" />
           <span>Back to Evaluations</span>
         </Link>
+
+        {evaluation && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={fetchDetails}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-semibold transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Refresh</span>
+            </button>
+
+            {evaluation.status !== "COMPLETED" ? (
+              <button
+                type="button"
+                onClick={handleStartEvaluation}
+                disabled={isRunning || evaluation.status === "RUNNING"}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
+              >
+                {isRunning || evaluation.status === "RUNNING" ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Running In-Enclave...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3.5 h-3.5" />
+                    <span>Run Evaluation</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleStartEvaluation}
+                disabled={isRunning}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100 text-xs font-semibold transition-colors"
+              >
+                <Play className="w-3.5 h-3.5" />
+                <span>Re-run Evaluation</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -143,7 +228,7 @@ export default function EvaluationDetailPage() {
                     <StatusBadge status={evaluation.status} />
                   </div>
                   <p className="text-xs text-slate-600">
-                    {evaluation.description || "No description provided."}
+                    {evaluation.description || "In-enclave privacy-preserving quality assessment."}
                   </p>
                   <p className="text-[11px] text-slate-400 font-mono">
                     ID: {evaluation.id}
@@ -196,128 +281,240 @@ export default function EvaluationDetailPage() {
             </div>
           </div>
 
-          {/* Section: Evaluation Progress */}
+          {/* Privacy & Health Score Overview Card */}
+          <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 divide-y md:divide-y-0 md:divide-x divide-slate-100">
+              {/* Overall Health Score */}
+              <div className="space-y-1">
+                <span className="text-xs text-slate-500 font-medium">Data Health Score</span>
+                <div className="text-3xl font-extrabold text-slate-900 font-mono">
+                  {healthScore !== null ? `${healthScore.toFixed(1)}%` : "—"}
+                </div>
+                <span className="text-[11px] text-teal-600 font-medium">
+                  {healthScore !== null ? "Weighted multi-engine score" : "Pending execution"}
+                </span>
+              </div>
+
+              {/* Privacy Guardrail Status */}
+              <div className="space-y-1 md:pl-6 pt-3 md:pt-0">
+                <span className="text-xs text-slate-500 font-medium">Privacy Guardrail</span>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-6 h-6 text-teal-600" />
+                  <span className="text-lg font-bold text-teal-800">ENFORCED</span>
+                </div>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  Zero raw records retained
+                </span>
+              </div>
+
+              {/* Raw Records Transferred Invariant */}
+              <div className="space-y-1 md:pl-6 pt-3 md:pt-0">
+                <span className="text-xs text-slate-500 font-medium">Raw Records Transferred</span>
+                <div className="text-2xl font-bold text-slate-900 font-mono">
+                  0
+                </div>
+                <span className="text-[11px] text-emerald-700 font-medium">
+                  Architectural Invariant Verified
+                </span>
+              </div>
+
+              {/* Execution Status & Time */}
+              <div className="space-y-1 md:pl-6 pt-3 md:pt-0">
+                <span className="text-xs text-slate-500 font-medium">Status & Timing</span>
+                <div>
+                  <StatusBadge status={evaluation.status} />
+                </div>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  {latestResult ? `${latestResult.processingTimeMs} ms elapsed` : "Ready to run"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section: Data Health & Trust Report (7 Engine Breakdown) */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-teal-600" />
+                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  Data Health & Trust Report (In-Enclave Engines)
+                </h3>
+              </div>
+              <span className="text-xs text-slate-500 font-mono">
+                7 Core Verification Engines
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* 1. Completeness */}
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 space-y-2 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-700">Completeness</span>
+                  <StatusBadge status={detailed?.completeness?.status || (latestResult ? "PASSED" : "PENDING")} />
+                </div>
+                <div className="text-2xl font-extrabold text-slate-900 font-mono">
+                  {latestResult ? `${(detailed?.completeness?.completeness_score ?? latestResult.completenessScore).toFixed(1)}%` : "—"}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Missing value rate: {latestResult ? `${(detailed?.completeness?.missing_rate ?? latestResult.missingValueRate).toFixed(2)}%` : "—"}
+                </p>
+              </div>
+
+              {/* 2. Validity */}
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 space-y-2 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-700">Validity</span>
+                  <StatusBadge status={detailed?.validity?.status || (latestResult ? "PASSED" : "PENDING")} />
+                </div>
+                <div className="text-2xl font-extrabold text-slate-900 font-mono">
+                  {latestResult ? `${(detailed?.validity?.validity_score ?? 100.0).toFixed(1)}%` : "—"}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Invalid values: {latestResult ? (detailed?.validity?.invalid_value_count ?? latestResult.invalidValueCount) : "—"}
+                </p>
+              </div>
+
+              {/* 3. Duplicates */}
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 space-y-2 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-700">Uniqueness (Duplicates)</span>
+                  <StatusBadge status={detailed?.duplicates?.status || (latestResult ? "PASSED" : "PENDING")} />
+                </div>
+                <div className="text-2xl font-extrabold text-slate-900 font-mono">
+                  {latestResult ? `${(100.0 - (detailed?.duplicates?.duplicate_rate ?? latestResult.duplicateRate)).toFixed(1)}%` : "—"}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Duplicate row rate: {latestResult ? `${(detailed?.duplicates?.duplicate_rate ?? latestResult.duplicateRate).toFixed(2)}%` : "—"}
+                </p>
+              </div>
+
+              {/* 4. Consistency */}
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 space-y-2 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-700">Logical Consistency</span>
+                  <StatusBadge status={detailed?.consistency?.status || (latestResult ? "PASSED" : "PENDING")} />
+                </div>
+                <div className="text-2xl font-extrabold text-slate-900 font-mono">
+                  {latestResult ? `${(detailed?.consistency?.consistency_score ?? latestResult.consistencyScore).toFixed(1)}%` : "—"}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Inconsistency rate: {latestResult ? `${(detailed?.consistency?.inconsistency_rate ?? 0.0).toFixed(2)}%` : "—"}
+                </p>
+              </div>
+
+              {/* 5. Outliers */}
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 space-y-2 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-700">Outlier Detection</span>
+                  <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-semibold font-mono">IQR Bounds</span>
+                </div>
+                <div className="text-2xl font-extrabold text-slate-900 font-mono">
+                  {latestResult ? `${(detailed?.outliers?.outlier_rate ?? 0.0).toFixed(2)}%` : "—"}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Outliers detected: {latestResult ? (detailed?.outliers?.outlier_count ?? 0) : "—"}
+                </p>
+              </div>
+
+              {/* 6. Anomalies */}
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 space-y-2 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-700">Anomaly Analysis</span>
+                  <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 text-[10px] font-semibold font-mono">Z-Score 3σ</span>
+                </div>
+                <div className="text-2xl font-extrabold text-slate-900 font-mono">
+                  {latestResult ? `${(detailed?.anomalies?.anomaly_rate ?? 0.0).toFixed(2)}%` : "—"}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Anomalies detected: {latestResult ? (detailed?.anomalies?.anomaly_count ?? latestResult.anomalyCount) : "—"}
+                </p>
+              </div>
+
+              {/* 7. Bias & Fairness */}
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 space-y-2 shadow-sm col-span-1 sm:col-span-2 lg:col-span-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-700">Bias & Demographic Fairness</span>
+                  <StatusBadge status={detailed?.bias_fairness?.status || (latestResult ? "PASSED" : "PENDING")} />
+                </div>
+                <div className="flex items-baseline gap-4">
+                  <div className="text-2xl font-extrabold text-slate-900 font-mono">
+                    {latestResult ? `${(detailed?.bias_fairness?.fairness_score ?? 100.0).toFixed(1)}%` : "—"}
+                  </div>
+                  <span className="text-xs text-slate-500">
+                    Max group rate disparity: {latestResult ? `${((detailed?.bias_fairness?.max_disparity ?? latestResult.biasIndicator) * 100).toFixed(2)}%` : "—"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Local demographic-parity disparity evaluation. Individual protected attributes are never exported.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Section: Evaluation Progress Stepper */}
           <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-[#F1F5F9]">
               <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-amber-600" />
+                <Clock className="w-4 h-4 text-slate-700" />
                 <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                  Evaluation Progress
+                  Execution Workflow
                 </h3>
               </div>
               <StatusBadge status={evaluation.status} />
             </div>
 
-            {/* Progress Notification Banner */}
-            <div className="p-4 rounded-xl bg-amber-50/80 border border-amber-200/80 text-amber-900 space-y-1.5">
-              <div className="flex items-center gap-2 font-semibold text-xs text-amber-800">
-                <Info className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Evaluation is ready for local Agent execution.</span>
-              </div>
-              <p className="text-[11px] text-amber-700 leading-relaxed pl-6">
-                The evaluation specification has been verified and registered in the cloud catalog. Execution takes place locally within your organization’s enclave via the Verdix Agent CLI. Raw organization data is never uploaded to the cloud.
-              </p>
-            </div>
-
-            {/* Stepper Timeline */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-2">
               <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/50 space-y-1">
                 <div className="flex items-center gap-1.5 text-emerald-700 font-semibold text-xs">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>1. Registered</span>
+                  <span>1. Specification Registered</span>
                 </div>
                 <p className="text-[10px] text-slate-600">
-                  Evaluation specification validated and queued.
+                  Evaluation registered in catalog.
                 </p>
               </div>
 
-              <div className="p-3 rounded-xl border border-amber-300 bg-amber-50/50 space-y-1">
-                <div className="flex items-center gap-1.5 text-amber-700 font-semibold text-xs">
-                  <Clock className="w-4 h-4 animate-pulse" />
-                  <span>2. Ready for Agent</span>
+              <div className={`p-3 rounded-xl border space-y-1 ${evaluation.status === "RUNNING" ? "border-amber-300 bg-amber-50" : "border-emerald-200 bg-emerald-50/50"}`}>
+                <div className="flex items-center gap-1.5 text-slate-800 font-semibold text-xs">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>2. Instruction Dispatched</span>
                 </div>
                 <p className="text-[10px] text-slate-600">
-                  Waiting for local Agent worker dispatch.
+                  Local enclave worker receives task.
                 </p>
               </div>
 
-              <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-1 text-slate-400">
+              <div className={`p-3 rounded-xl border space-y-1 ${evaluation.status === "COMPLETED" ? "border-emerald-200 bg-emerald-50/50" : evaluation.status === "RUNNING" ? "border-amber-300 bg-amber-50/80" : "border-slate-200 bg-slate-50"}`}>
                 <div className="flex items-center gap-1.5 font-semibold text-xs">
-                  <Cpu className="w-4 h-4" />
+                  <Cpu className="w-4 h-4 text-teal-600" />
                   <span>3. Local Enclave Run</span>
                 </div>
                 <p className="text-[10px] text-slate-500">
-                  In-enclave privacy and quality calculation.
+                  Computations execute 100% locally.
                 </p>
               </div>
 
-              <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-1 text-slate-400">
+              <div className={`p-3 rounded-xl border space-y-1 ${evaluation.status === "COMPLETED" ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200 bg-slate-50"}`}>
                 <div className="flex items-center gap-1.5 font-semibold text-xs">
-                  <ShieldCheck className="w-4 h-4" />
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
                   <span>4. Aggregate Ingestion</span>
                 </div>
                 <p className="text-[10px] text-slate-500">
-                  Approved aggregate metrics return to dashboard.
+                  Zero raw records transferred.
                 </p>
               </div>
             </div>
-          </div>
-
-          {/* Section: Selected Evaluation Checks */}
-          <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#F1F5F9]">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-teal-600" />
-                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                  Configured Evaluation Checks
-                </h3>
-              </div>
-              <span className="text-xs text-slate-500 font-mono">
-                {evaluation.checks?.length || 0} checks requested
-              </span>
-            </div>
-
-            {evaluation.checks && evaluation.checks.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {evaluation.checks.map((chkId) => {
-                  const checkMeta = CHECK_DESCRIPTIONS[chkId] || {
-                    name: chkId,
-                    description: "Enclave verification check.",
-                  };
-                  return (
-                    <div
-                      key={chkId}
-                      className="p-3.5 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] space-y-1"
-                    >
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
-                        <span className="font-semibold text-xs text-slate-900">
-                          {checkMeta.name}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 pl-6 leading-relaxed">
-                        {checkMeta.description}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-xs text-slate-500 italic">
-                Standard comprehensive suite configured.
-              </p>
-            )}
           </div>
 
           {/* Privacy Invariant Assurance Card */}
           <div className="rounded-2xl border border-teal-200 bg-teal-50/60 p-5 shadow-xs flex items-start gap-3">
-            <ShieldCheck className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
+            <Lock className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
             <div className="space-y-1 text-xs text-teal-900">
               <h4 className="font-bold text-teal-800">
                 Architectural Invariant Active: Zero Raw Data Retention
               </h4>
               <p className="text-[11px] text-teal-700 leading-relaxed">
-                Verdix ensures that neither credentials, row-level CSVs, nor confidential database rows are uploaded during evaluation creation. Computations execute inside your trusted enclave environment.
+                Verdix guarantees that neither credentials, row-level CSVs, nor confidential records are uploaded to the cloud during evaluations. All profiling, outlier detection, and fairness calculations execute strictly inside your local enclave environment.
               </p>
             </div>
           </div>

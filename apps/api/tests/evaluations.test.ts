@@ -380,6 +380,103 @@ async function runEvaluationTests() {
     }
   });
 
+  // 15. POST /api/v1/evaluations/:id/run transitions status to RUNNING and dispatches instruction
+  await test("15. POST /api/v1/evaluations/:id/run transitions evaluation to RUNNING", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/evaluations/${createdEvalId}/run?execute=false`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${analystToken}`,
+      },
+    });
+    if (res.status !== 200) {
+      throw new Error(`Expected 200 OK, got ${res.status}: ${await res.text()}`);
+    }
+    const json = await res.json();
+    if (json.status !== "RUNNING") {
+      throw new Error(`Expected status RUNNING, got ${json.status}`);
+    }
+    if (!json.instruction || !json.instruction.command) {
+      throw new Error("Missing instruction in /run response");
+    }
+    if (json.instruction.privacyInvariant !== "raw_records_transferred=0") {
+      throw new Error("Missing or invalid privacyInvariant in instruction");
+    }
+  });
+
+  // 16. POST /api/v1/evaluations/:id/results stores aggregate result and marks COMPLETED
+  await test("16. POST /api/v1/evaluations/:id/results stores aggregate and completes evaluation", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/evaluations/${createdEvalId}/results`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-verdix-agent-id": "agent-test-local",
+      },
+      body: JSON.stringify({
+        jobId: createdEvalId,
+        agentId: "agent-test-local",
+        datasetAlias: "synthetic_customers.csv",
+        healthScore: 98.5,
+        rawDataIncluded: false,
+        raw_records_transferred: 0,
+        privacyValidationPassed: true,
+        completeness: { completeness_score: 98.5, missing_rate: 1.5, status: "EXCELLENT" },
+        validity: { validity_score: 100.0, invalid_value_count: 0, status: "EXCELLENT" },
+        duplicates: { duplicate_rate: 0.0, unique_row_count: 26, status: "EXCELLENT" },
+        consistency: { consistency_score: 100.0, status: "EXCELLENT" },
+        outliers: { outlier_rate: 0.0, outlier_count: 0, status: "EXCELLENT" },
+        anomalies: { anomaly_rate: 0.0, anomaly_count: 0, status: "EXCELLENT" },
+        bias_fairness: { fairness_score: 100.0, max_disparity: 0.0, status: "INSUFFICIENT_DATA" },
+      }),
+    });
+
+    if (res.status !== 201) {
+      throw new Error(`Expected 201 Created, got ${res.status}: ${await res.text()}`);
+    }
+    const json = await res.json();
+    if (json.status !== "COMPLETED") {
+      throw new Error(`Expected status COMPLETED, got ${json.status}`);
+    }
+    if (json.raw_records_transferred !== 0) {
+      throw new Error(`Expected raw_records_transferred 0, got ${json.raw_records_transferred}`);
+    }
+  });
+
+  // 17. POST /api/v1/evaluations/:id/results rejects raw data payload
+  await test("17. POST /api/v1/evaluations/:id/results rejects prohibited raw data keys", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/evaluations/${createdEvalId}/results`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jobId: createdEvalId,
+        rawDataIncluded: false,
+        raw_records_transferred: 0,
+        rows: [{ id: 1, name: "Alice", email: "alice@example.com" }],
+      }),
+    });
+
+    if (res.status !== 400) {
+      throw new Error(`Expected 400 Bad Request for raw records payload, got ${res.status}`);
+    }
+  });
+
+  // 18. POST /api/v1/evaluations/:id/results rejects nonzero raw_records_transferred
+  await test("18. POST /api/v1/evaluations/:id/results rejects nonzero raw_records_transferred", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/evaluations/${createdEvalId}/results`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jobId: createdEvalId,
+        rawDataIncluded: false,
+        raw_records_transferred: 10, // Privacy Violation!
+      }),
+    });
+
+    if (res.status !== 400) {
+      throw new Error(`Expected 400 Bad Request for raw_records_transferred > 0, got ${res.status}`);
+    }
+  });
+
   console.log("\n--------------------------------------------------------");
   console.log(`Evaluation Suite: Total Passed: ${passed} | Total Failed: ${failed}`);
   console.log("--------------------------------------------------------\n");

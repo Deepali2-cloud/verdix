@@ -29,13 +29,18 @@ class CloudClient:
         }
         return self._post_json(f"{self.config.cloud_url}/api/v1/agent/heartbeat", payload)
 
-    def submit_aggregate_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+    def submit_aggregate_result(self, result: Dict[str, Any], evaluation_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Submits verified aggregate results to Verdix Cloud.
         """
         # Strictly assert no raw data is included
         PrivacyGuardrail.validate_aggregate_output(result)
-        return self._post_json(f"{self.config.cloud_url}/api/v1/evaluations/results", result)
+        eval_id = evaluation_id or result.get("evaluationId") or result.get("jobId")
+        if eval_id:
+            url = f"{self.config.cloud_url}/api/v1/evaluations/{eval_id}/results"
+        else:
+            url = f"{self.config.cloud_url}/api/v1/evaluations/results"
+        return self._post_json(url, result)
 
     def _post_json(self, url: str, data: Dict[str, Any]) -> Dict[str, Any]:
         body = json.dumps(data).encode("utf-8")

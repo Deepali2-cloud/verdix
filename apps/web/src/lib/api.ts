@@ -82,6 +82,8 @@ export interface ApiEvaluationResult {
   rawRecordsTransferred: number;
   processingTimeMs: number;
   createdAt: string;
+  healthScore?: number;
+  detailedMetrics?: any;
 }
 
 export interface ApiEvaluation {
@@ -266,4 +268,16 @@ export async function createEvaluation(
   }
   const json = await res.json();
   return json.data;
+}
+
+export async function runEvaluation(id: string): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/api/v1/evaluations/${id}/run`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Failed to dispatch evaluation" }));
+    throw new Error(err.message || err.error || "Failed to dispatch evaluation");
+  }
+  return res.json();
 }

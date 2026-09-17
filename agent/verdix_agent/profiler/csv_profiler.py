@@ -159,6 +159,7 @@ class ExportableProfile:
 # ---------------------------------------------------------------------------
 
 _BOOLEAN_VALUES = frozenset({"true", "false", "yes", "no", "1", "0", "t", "f", "y", "n"})
+_MISSING_SENTINELS = frozenset({"", "null", "none", "na", "n/a", "nan", "#n/a", "missing"})
 
 
 def _try_float(value: str) -> Optional[float]:
