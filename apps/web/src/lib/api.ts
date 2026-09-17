@@ -197,6 +197,30 @@ export async function logoutUser(): Promise<void> {
     setAuthToken(null);
   }
 }
+export async function connectLocalDataset(payload: {
+  name: string;
+  description?: string;
+  sourceType: "CSV_LOCAL";
+}): Promise<ApiDataset> {
+  const res = await fetch(`${API_BASE_URL}/api/v1/datasets`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res
+      .json()
+      .catch(() => ({ message: "Failed to connect local dataset" }));
+
+    throw new Error(
+      err.message || err.error || "Failed to connect local dataset"
+    );
+  }
+
+  const json = await res.json();
+  return json.data;
+}
 
 export async function getDatasets(): Promise<ApiDataset[]> {
   try {
