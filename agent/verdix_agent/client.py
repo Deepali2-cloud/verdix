@@ -1,61 +1,147 @@
-"""
-Verdix Cloud Client.
-Responsible for outbound-only communication with the Verdix Cloud API.
-Only sends agent heartbeats and verified aggregate results.
-"""
-import json
-import urllib.request
-import urllib.error
-from typing import Any, Dict, Optional
-from verdix_agent.config import AgentConfig
-from verdix_agent.policy import PrivacyGuardrail
+from __future__ import annotations
+
+from typing import Any, Optional
+
+import requests
+
+from .config import AgentConfig
+
 
 class CloudClient:
+    """
+    HTTP client for communicating with Verdix Cloud.
+
+    Privacy invariant:
+    The Agent may send protected aggregate results only.
+    Raw dataset records must never be transmitted.
+    """
+
     def __init__(self, config: AgentConfig):
         self.config = config
 
-    def send_heartbeat(self) -> Dict[str, Any]:
-        """
-        Sends an enclave presence heartbeat to the Verdix Cloud API.
-        """
-        payload = {
-            "agentId": self.config.agent_id,
-            "agentName": self.config.agent_name,
-            "version": "0.1.0",
-            "status": "idle",
-            "supportedMetrics": ["count", "summary_statistics", "quantile"],
-            "timestamp": "",
-            "enclaveEnvironment": self.config.environment,
+    def _headers(self) -> dict[str, str]:
+        """Build authenticated request headers."""
+        headers = {
+            "Content-Type": "application/json",
         }
-        return self._post_json(f"{self.config.cloud_url}/api/v1/agent/heartbeat", payload)
 
-    def submit_aggregate_result(self, result: Dict[str, Any], evaluation_id: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Submits verified aggregate results to Verdix Cloud.
-        """
-        # Strictly assert no raw data is included
-        PrivacyGuardrail.validate_aggregate_output(result)
-        eval_id = evaluation_id or result.get("evaluationId") or result.get("jobId")
-        if eval_id:
-            url = f"{self.config.cloud_url}/api/v1/evaluations/{eval_id}/results"
-        else:
-            url = f"{self.config.cloud_url}/api/v1/evaluations/results"
-        return self._post_json(url, result)
+        if self.config.agent_token:
+            headers["Authorization"] = (
+                f"Bearer {self.config.agent_token}"
+            )
 
-    def _post_json(self, url: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        body = json.dumps(data).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={
-    "Content-Type": "application/json",
-    "x-verdix-agent-id": self.config.agent_id,
-    "Authorization": f"Bearer {self.config.agent_token}",
-},
-            method="POST",
+        return headers
+
+    def get_jobs(self) -> list[dict[str, Any]]:
+        """
+        Fetch pending evaluation instructions from Verdix Cloud.
+
+        The cloud returns metadata/instructions only.
+
+        No:
+        - CSV files
+        - dataset rows
+        - raw records
+        - PII
+        """
+
+        url = (
+            f"{self.config.cloud_url.rstrip('/')}"
+            "/api/v1/agent/jobs"
         )
-        try:
-            with urllib.request.urlopen(req, timeout=5) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.URLError as e:
-            return {"error": str(e), "success": False}
+
+        response = requests.get(
+            url,
+            headers=self._headers(),
+            timeout=30,
+        )
+
+        response.raise_for_status()
+
+        payload = response.json()
+
+        jobs = payload.get("data", [])
+
+        if not isinstance(jobs, list):
+            raise ValueError(
+                "Invalid Agent jobs response: data must be a list"
+            )
+
+        # Defensive privacy validation.
+        for job in jobs:
+            if not isinstance(job, dict):
+                raise ValueError(
+                    "Invalid Agent job: expected object"
+                )
+
+            if job.get("rawDataIncluded") is True:
+                raise ValueError(
+                    "PRIVACY VIOLATION: Cloud attempted to send raw data"
+                )
+
+            if job.get("rawRecordsTransferred", 0) != 0:
+                raise ValueError(
+                    "PRIVACY VIOLATION: Job contains transferred raw records"
+                )
+
+        return jobs
+
+    def send_heartbeat(self) -> dict[str, Any]:
+        """Send an authenticated Agent heartbeat to Verdix Cloud."""
+
+        url = (
+            f"{self.config.cloud_url.rstrip('/')}"
+            "/api/v1/agent/heartbeat"
+        )
+
+        response = requests.post(
+            url,
+            headers=self._headers(),
+            json={
+                "agentId": self.config.agent_id,
+                "agentName": self.config.agent_name,
+                "environment": self.config.environment,
+            },
+            timeout=30,
+        )
+
+        response.raise_for_status()
+
+        return response.json()
+
+    def submit_aggregate_result(
+        self,
+        evaluation_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Submit a privacy-preserving evaluation result.
+
+        The payload must contain no raw records.
+        """
+
+        if payload.get("rawDataIncluded") is True:
+            raise ValueError(
+                "PRIVACY VIOLATION: rawDataIncluded=True"
+            )
+
+        if payload.get("raw_records_transferred", 0) != 0:
+            raise ValueError(
+                "PRIVACY VIOLATION: raw records detected"
+            )
+
+        url = (
+            f"{self.config.cloud_url.rstrip('/')}"
+            f"/api/v1/evaluations/{evaluation_id}/results"
+        )
+
+        response = requests.post(
+            url,
+            headers=self._headers(),
+            json=payload,
+            timeout=30,
+        )
+
+        response.raise_for_status()
+
+        return response.json()

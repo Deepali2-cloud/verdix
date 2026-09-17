@@ -417,6 +417,85 @@ app.get("/api/v1/organizations", requireAuth, async (req: Request, res: Response
 });
 
 /**
+ * POST /api/v1/datasets
+ *
+ * Registers metadata for a dataset that remains inside the organization's
+ * local Verdix Agent environment.
+ *
+ * IMPORTANT:
+ * This endpoint never accepts a dataset file, rows, records, or raw data.
+ */
+app.post("/api/v1/datasets", requireAuth, requireRole(UserRole.ADMIN, UserRole.ANALYST), async (req: Request, res: Response) => {
+  try {
+    const schema = z.object({
+      name: z.string().trim().min(1).max(120),
+      description: z.string().trim().max(500).optional(),
+      sourceType: z.literal("CSV_LOCAL").default("CSV_LOCAL"),
+    });
+
+    const validated = schema.parse(req.body);
+    const organizationId = req.user!.organizationId;
+
+    const dataset = await prisma.dataset.create({
+      data: {
+        organizationId,
+        name: validated.name,
+        description: validated.description,
+        sourceType: validated.sourceType,
+        status: "CONNECTED",
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        name: true,
+        description: true,
+        sourceType: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        organizationId,
+        action: "DATASET_CONNECTED",
+        evaluationId: null,
+        metadata: {
+          datasetId: dataset.id,
+          datasetName: dataset.name,
+          sourceType: dataset.sourceType,
+          rawDataTransferred: false,
+        },
+      },
+    });
+
+    res.status(201).json({
+      data: dataset,
+      message: "Local dataset metadata connected successfully. Raw data remains inside the Verdix Agent.",
+      privacy: {
+        rawDataTransferred: false,
+        rawRecordsTransferred: 0,
+      },
+    });
+  } catch (err: unknown) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({
+        error: "Invalid dataset metadata",
+        details: err.flatten(),
+      });
+      return;
+    }
+
+    const error = err as Error;
+    logger.error(`Error connecting local dataset: ${error.message}`);
+
+    res.status(500).json({
+      error: "Failed to connect local dataset",
+    });
+  }
+});
+/**
  * GET /api/v1/datasets (Organization-scoped, metadata only)
  */
 app.get("/api/v1/datasets", requireAuth, async (req: Request, res: Response) => {
@@ -968,6 +1047,90 @@ function requireAgentToken(req: Request, res: Response, next: () => void): void 
 // 5. AGENT HEARTBEAT & INGESTION (Existing Endpoints)
 // ==============================================================================
 
+/**
+ * GET /api/v1/agent/jobs
+ *
+ * Returns pending evaluation instructions for the local Verdix Agent.
+ *
+ * PRIVACY INVARIANT:
+ * - No dataset file is returned.
+ * - No dataset rows are returned.
+ * - No raw records are returned.
+ * - Only evaluation metadata/instructions are returned.
+ */
+app.get(
+  "/api/v1/agent/jobs",
+  requireAgentToken,
+  async (_req: Request, res: Response) => {
+    try {
+      const pendingEvaluations = await prisma.evaluation.findMany({
+        where: {
+          status: {
+            in: ["PENDING", "READY", "QUEUED"],
+          },
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+        take: 10,
+        select: {
+          id: true,
+          organizationId: true,
+          datasetId: true,
+          name: true,
+          description: true,
+          checks: true,
+          status: true,
+          createdAt: true,
+          dataset: {
+            select: {
+              id: true,
+              name: true,
+              sourceType: true,
+              status: true,
+            },
+          },
+        },
+      });
+
+      const jobs = pendingEvaluations.map((evaluation) => ({
+        evaluationId: evaluation.id,
+        datasetId: evaluation.datasetId,
+        datasetAlias: evaluation.dataset.name,
+        evaluationName: evaluation.name,
+        description: evaluation.description,
+        checks: evaluation.checks,
+        status: evaluation.status,
+        createdAt: evaluation.createdAt,
+
+        // Explicit privacy contract:
+        rawDataIncluded: false,
+        rawRecordsTransferred: 0,
+      }));
+
+      res.json({
+        data: jobs,
+        count: jobs.length,
+
+        privacy: {
+          rawDataIncluded: false,
+          rawRecordsTransferred: 0,
+        },
+      });
+    } catch (err: unknown) {
+      const error = err as Error;
+
+      logger.error(
+        `Error fetching Agent jobs: ${error.message}`
+      );
+
+      res.status(500).json({
+        error: "Failed to fetch Agent jobs",
+      });
+    }
+  }
+);
+
 app.post("/api/v1/agent/heartbeat", requireAgentToken, (req: Request, res: Response) => {
   const heartbeat = req.body as AgentHeartbeat;
 
@@ -1288,3 +1451,4 @@ if (!isTestRun) {
 }
 
 export { app, server };
+
